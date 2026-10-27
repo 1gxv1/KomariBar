@@ -11,5 +11,6 @@ xcuserdata/
 *.ppk
 *.key
 id_rsa*
-credentials*
-local-settings*
+credentials*.json
+credentials*.txt
+local-settings*.json
