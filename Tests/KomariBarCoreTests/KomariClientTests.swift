@@ -161,7 +161,7 @@ final class KomariClientTests: XCTestCase {
         defer { target.stop() }
         let redirector = try LocalHTTPFixture { request in
             XCTAssertTrue(request.lowercased().contains("authorization: bearer fixture-key"))
-            return .redirect(to: target.url)
+            return .redirectToURL(target.url)
         }
         defer { redirector.stop() }
         let client = KomariClient(connection: .init(baseURL: redirector.url, apiKey: "fixture-key"))
@@ -173,7 +173,7 @@ final class KomariClientTests: XCTestCase {
     func testSameOriginRedirectCanReachCanonicalRPCPath() async throws {
         let server = try LocalHTTPFixture { request in
             if request.hasPrefix("POST /api/rpc2 ") {
-                return .redirect(toPath: "/canonical")
+                return .redirectToPath("/canonical")
             }
             return .json(#"{"jsonrpc":"2.0","id":1,"result":{"version":"1.6.1"}}"#)
         }
@@ -258,17 +258,17 @@ private final class RPCURLProtocol: URLProtocol {
 private final class LocalHTTPFixture: @unchecked Sendable {
     enum Reply {
         case json(String)
-        case redirect(to: URL)
-        case redirect(toPath: String)
+        case redirectToURL(URL)
+        case redirectToPath(String)
 
         var bytes: Data {
             let text: String
             switch self {
             case .json(let body):
                 text = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
-            case .redirect(to: let url):
+            case .redirectToURL(let url):
                 text = "HTTP/1.1 307 Temporary Redirect\r\nLocation: \(url.absoluteString)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            case .redirect(toPath: let path):
+            case .redirectToPath(let path):
                 text = "HTTP/1.1 307 Temporary Redirect\r\nLocation: \(path)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             }
             return Data(text.utf8)
