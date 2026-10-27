@@ -1,0 +1,15 @@
+.DS_Store
+.build/
+.swiftpm/
+dist/
+build/
+*.xcuserstate
+xcuserdata/
+.env
+.env.*
+*.pem
+*.ppk
+*.key
+id_rsa*
+credentials*
+local-settings*
