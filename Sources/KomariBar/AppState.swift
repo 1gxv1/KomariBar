@@ -15,6 +15,7 @@ final class AppState: ObservableObject {
     @Published private(set) var lastSuccessfulRefresh: Date?
     @Published private(set) var configuredURLString: String
     @Published private(set) var hasSavedAPIKey = false
+    @Published private(set) var refreshIntervalSeconds: TimeInterval
     @Published private var savedTrafficSettings: [String: TrafficSettings] = [:]
 
     private let defaults: UserDefaults
@@ -36,7 +37,8 @@ final class AppState: ObservableObject {
             resetDay: 15,
             timeZoneIdentifier: "UTC",
             quotaBytes: selectedNode?.trafficQuotaBytes,
-            accounting: selectedNode?.trafficAccounting ?? .max
+            accounting: selectedNode?.trafficAccounting ?? .max,
+            statisticsStartedAt: isDemoMode ? Date(timeIntervalSince1970: 0) : nil
         )
     }
     var selectedTraffic: TrafficUsage? {
@@ -47,7 +49,7 @@ final class AppState: ObservableObject {
         guard let snapshot = selectedSnapshot else { return "KomariBar" }
         if isDemoMode { return "示例 \(Int(snapshot.cpuPercent))%" }
         if !snapshot.isOnline { return "节点离线" }
-        if abs(Date().timeIntervalSince(snapshot.timestamp)) > 30 { return "数据过期" }
+        if !isSnapshotFresh(snapshot.timestamp) { return "数据过期" }
         return "CPU \(Int(snapshot.cpuPercent))%"
     }
     private var trafficSettingsKey: String {
@@ -57,6 +59,7 @@ final class AppState: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         configuredURLString = defaults.string(forKey: "panelURL") ?? ""
+        refreshIntervalSeconds = ClientPreferences(refreshIntervalSeconds: defaults.double(forKey: "refreshIntervalSeconds")).refreshIntervalSeconds
         if let data = defaults.data(forKey: "trafficSettings"),
            let settings = try? JSONDecoder().decode([String: TrafficSettings].self, from: data) {
             savedTrafficSettings = settings
@@ -82,9 +85,30 @@ final class AppState: ObservableObject {
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { break }
+                guard let interval = self?.refreshIntervalSeconds else { break }
+                do { try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000)) } catch { break }
             }
         }
+    }
+
+    func setRefreshInterval(_ seconds: TimeInterval) {
+        let interval = ClientPreferences(refreshIntervalSeconds: seconds).refreshIntervalSeconds
+        guard refreshIntervalSeconds != interval else { return }
+        refreshIntervalSeconds = interval
+        defaults.set(interval, forKey: "refreshIntervalSeconds")
+        guard pollingTask != nil else { return }
+        // Invalidate any old request before immediately starting the new schedule.
+        generation += 1
+        pollingTask?.cancel()
+        pollingTask = nil
+        historyTask?.cancel()
+        lastHistoryRefresh = .distantPast
+        isRefreshing = false
+        startPolling()
+    }
+
+    func isSnapshotFresh(_ timestamp: Date) -> Bool {
+        ClientPreferences(refreshIntervalSeconds: refreshIntervalSeconds).isSnapshotFresh(timestamp)
     }
 
     func refresh() async {

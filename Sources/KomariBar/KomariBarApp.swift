@@ -33,6 +33,8 @@ final class KomariBarDelegate: NSObject, NSApplicationDelegate {
         model.startPolling()
         if CommandLine.arguments.contains("--window") {
             AppWindows.shared.showDashboard(model: model)
+        } else if !model.isConfigured && !CommandLine.arguments.contains("--demo") {
+            AppWindows.shared.showSettings(model: model)
         }
     }
 }
@@ -60,12 +62,13 @@ final class AppWindows {
         if dashboardWindow == nil {
             let root = DashboardView(model: model, openSettings: { self.showSettings(model: model) })
             let window = NSWindow(contentViewController: NSHostingController(rootView: root))
-            window.title = "KomariBar · 开发预览"
+            window.title = model.isDemoMode ? "KomariBar · 示例预览" : "KomariBar · 实时监控"
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false
             window.center()
             dashboardWindow = window
         }
+        dashboardWindow?.title = model.isDemoMode ? "KomariBar · 示例预览" : "KomariBar · 实时监控"
         NSApp.activate(ignoringOtherApps: true)
         dashboardWindow?.makeKeyAndOrderFront(nil)
     }

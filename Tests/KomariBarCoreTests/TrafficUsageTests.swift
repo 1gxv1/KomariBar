@@ -108,8 +108,77 @@ final class TrafficUsageTests: XCTestCase {
         XCTAssertEqual(result.remainingBytes, 1_000)
     }
 
+    func testInstallationMidPeriodShowsOnlyRecordedTrafficWithoutBudget() {
+        var settings = configured(resetDay: 10, accounting: .sum)
+        settings.statisticsStartedAt = iso("2026-10-26T08:30:00Z")
+        let result = TrafficUsage.calculate(snapshot: snapshot(upload: 800, download: 500), settings: settings, now: now)
+        XCTAssertEqual(result.label, "本期已记录")
+        XCTAssertEqual(result.usedBytes, 1_300)
+        XCTAssertEqual(result.uploadedBytes, 800)
+        XCTAssertEqual(result.downloadedBytes, 500)
+        XCTAssertEqual(result.period?.start, iso("2026-10-10T00:00:00Z"))
+        XCTAssertNil(result.quotaBytes)
+        XCTAssertNil(result.remainingBytes)
+        XCTAssertNil(result.fractionUsed)
+        XCTAssertTrue(result.configurationIssue?.contains("本期数据不完整") == true)
+    }
+
+    func testFirstFullResetAutomaticallyEnablesPeriodBudget() {
+        var settings = configured(resetDay: 10, accounting: .sum)
+        settings.statisticsStartedAt = iso("2026-10-26T08:30:00Z")
+        let reset = iso("2026-11-10T00:00:00Z")
+        let result = TrafficUsage.calculate(snapshot: snapshot(at: reset, upload: 20, download: 10), settings: settings, now: reset)
+        XCTAssertEqual(result.label, "本期流量")
+        XCTAssertEqual(result.period?.start, reset)
+        XCTAssertEqual(result.usedBytes, 30)
+        XCTAssertEqual(result.quotaBytes, 1_000)
+        XCTAssertEqual(result.remainingBytes, 970)
+        XCTAssertEqual(result.fractionUsed, 0.03)
+        XCTAssertNil(result.configurationIssue)
+    }
+
+    func testStatisticsBeginningAtResetCoversWholePeriod() {
+        var settings = configured(resetDay: 10)
+        settings.statisticsStartedAt = iso("2026-10-10T00:00:00Z")
+        let result = TrafficUsage.calculate(snapshot: snapshot(), settings: settings, now: now)
+        XCTAssertEqual(result.label, "本期流量")
+        XCTAssertNotNil(result.remainingBytes)
+        XCTAssertNil(result.configurationIssue)
+    }
+
+    func testFutureStatisticsStartCannotProduceRemainingBudget() {
+        var settings = configured(resetDay: 10)
+        settings.statisticsStartedAt = iso("2026-11-01T00:00:00Z")
+        let result = TrafficUsage.calculate(snapshot: snapshot(), settings: settings, now: now)
+        XCTAssertEqual(result.label, "本期已记录")
+        XCTAssertNil(result.remainingBytes)
+        XCTAssertNil(result.fractionUsed)
+        XCTAssertNotNil(result.configurationIssue)
+    }
+
+    func testOlderSavedSettingsDecodeWithUnknownCoverage() throws {
+        let oldJSON = Data(#"{"monthlyRotationConfirmed":true,"resetDay":10,"timeZoneIdentifier":"UTC","quotaBytes":1000,"accounting":"sum"}"#.utf8)
+        let settings = try JSONDecoder().decode(TrafficSettings.self, from: oldJSON)
+        XCTAssertNil(settings.statisticsStartedAt)
+        let result = TrafficUsage.calculate(snapshot: snapshot(upload: 80, download: 50), settings: settings, now: now)
+        XCTAssertEqual(result.label, "本期已记录")
+        XCTAssertEqual(result.usedBytes, 130)
+        XCTAssertNotNil(result.period)
+        XCTAssertNil(result.quotaBytes)
+        XCTAssertNil(result.remainingBytes)
+        XCTAssertNil(result.fractionUsed)
+        XCTAssertTrue(result.configurationIssue?.contains("尚未确认") == true)
+    }
+
+    func testStatisticsStartSurvivesSettingsRoundTrip() throws {
+        var settings = configured(resetDay: 10)
+        settings.statisticsStartedAt = iso("2026-10-26T08:30:00Z")
+        let data = try JSONEncoder().encode(settings)
+        XCTAssertEqual(try JSONDecoder().decode(TrafficSettings.self, from: data), settings)
+    }
+
     private func configured(resetDay: Int = 1, accounting: TrafficAccounting = .max) -> TrafficSettings {
-        TrafficSettings(monthlyRotationConfirmed: true, resetDay: resetDay, timeZoneIdentifier: "UTC", quotaBytes: 1_000, accounting: accounting)
+        TrafficSettings(monthlyRotationConfirmed: true, resetDay: resetDay, timeZoneIdentifier: "UTC", quotaBytes: 1_000, accounting: accounting, statisticsStartedAt: iso("2020-01-01T00:00:00Z"))
     }
 
     private func snapshot(at date: Date? = nil, upload: Double = 200, download: Double = 100) -> ServerSnapshot {

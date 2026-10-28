@@ -18,6 +18,7 @@ struct DashboardView: View {
                             nodes: model.nodes,
                             snapshots: model.snapshots,
                             selectedID: model.selectedNodeID,
+                            isSnapshotFresh: model.isSnapshotFresh,
                             select: model.selectNode
                         )
                     }
@@ -111,7 +112,7 @@ struct DashboardView: View {
 
     private func serverHeading(_ node: ServerNode) -> some View {
         let snapshot = model.selectedSnapshot
-        let fresh = snapshot.map { UIFormat.isFresh($0.timestamp) } ?? false
+        let fresh = snapshot.map { model.isSnapshotFresh($0.timestamp) } ?? false
         let active = snapshot?.isOnline == true && fresh
         return HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 5) {
@@ -146,7 +147,7 @@ struct DashboardView: View {
 
     private func resourceCards(_ node: ServerNode) -> some View {
         let snapshot = model.selectedSnapshot
-        let stale = snapshot.map { !$0.isOnline || !UIFormat.isFresh($0.timestamp) } ?? false
+        let stale = snapshot.map { !$0.isOnline || !model.isSnapshotFresh($0.timestamp) } ?? false
         return HStack(spacing: 10) {
             MetricCard(title: "CPU", symbol: "cpu", value: snapshot.map { UIFormat.percent($0.cpuPercent) } ?? "—", detail: stale ? "最后记录" : (node.cpuCores > 0 ? "\(node.cpuCores) 核处理器" : "使用率"), fraction: snapshot.map { $0.cpuPercent / 100 }, accent: Palette.lavender)
             MetricCard(title: "内存", symbol: "memorychip", value: snapshot.flatMap { $0.memoryTotalBytes > 0 ? UIFormat.percent($0.memoryPercent) : nil } ?? "—", detail: snapshot.flatMap { $0.memoryTotalBytes > 0 ? "\(UIFormat.memory($0.memoryUsedBytes)) / \(UIFormat.memory($0.memoryTotalBytes))" : nil } ?? "等待内存信息", fraction: snapshot.flatMap { $0.memoryTotalBytes > 0 ? $0.memoryPercent / 100 : nil }, accent: Palette.blue)
@@ -157,7 +158,7 @@ struct DashboardView: View {
 
     private var networkCards: some View {
         let snapshot = model.selectedSnapshot
-        let live = snapshot.map { $0.isOnline && UIFormat.isFresh($0.timestamp) } ?? false
+        let live = snapshot.map { $0.isOnline && model.isSnapshotFresh($0.timestamp) } ?? false
         return HStack(spacing: 10) {
             NetworkCard(title: "上传速度", symbol: "arrow.up.right", value: live ? UIFormat.speed(snapshot?.uploadBytesPerSecond ?? 0) : "—", accent: Palette.mint)
             NetworkCard(title: "下载速度", symbol: "arrow.down.left", value: live ? UIFormat.speed(snapshot?.downloadBytesPerSecond ?? 0) : "—", accent: Palette.blue)
@@ -231,7 +232,7 @@ struct DashboardView: View {
     private var footerStatusColor: Color {
         if model.lastError != nil { return Palette.amber }
         guard let snapshot = model.selectedSnapshot else { return Palette.secondary }
-        return snapshot.isOnline && UIFormat.isFresh(snapshot.timestamp) ? Palette.mint.opacity(0.7) : Palette.secondary
+        return snapshot.isOnline && model.isSnapshotFresh(snapshot.timestamp) ? Palette.mint.opacity(0.7) : Palette.secondary
     }
 }
 
@@ -239,12 +240,13 @@ private struct ServerPicker: View {
     let nodes: [ServerNode]
     let snapshots: [String: ServerSnapshot]
     let selectedID: String?
+    let isSnapshotFresh: (Date) -> Bool
     let select: (String) -> Void
 
     private var onlineCount: Int {
         nodes.filter { node in
             guard let snapshot = snapshots[node.id] else { return false }
-            return snapshot.isOnline && UIFormat.isFresh(snapshot.timestamp)
+            return snapshot.isOnline && isSnapshotFresh(snapshot.timestamp)
         }.count
     }
 
@@ -503,6 +505,12 @@ private struct TrafficCard: View {
                     }
                 }
             }
+            HStack(spacing: 14) {
+                Label("上传 \(UIFormat.traffic(usage.uploadedBytes))", systemImage: "arrow.up")
+                Label("下载 \(UIFormat.traffic(usage.downloadedBytes))", systemImage: "arrow.down")
+            }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(Palette.secondary)
             if periodConfirmed {
                 UsageBar(fraction: usage.fractionUsed, accent: accent, height: 7)
                 HStack {
@@ -522,6 +530,15 @@ private struct TrafficCard: View {
                     .font(.system(size: 10))
                     .foregroundStyle(usage.configurationIssue == nil ? Palette.secondary : Palette.amber)
                     .fixedSize(horizontal: false, vertical: true)
+                if let period = usage.period {
+                    HStack {
+                        Text(settings.accounting.title)
+                        Spacer()
+                        Text("\(UIFormat.cycleDate(period.end, zone: settings.timeZoneIdentifier)) 重置 · \(settings.timeZoneIdentifier)")
+                    }
+                    .font(.system(size: 9))
+                    .foregroundStyle(Palette.secondary)
+                }
             }
         }
         .padding(16)

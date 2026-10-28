@@ -14,6 +14,8 @@ struct SettingsView: View {
     @LocalState private var timeZoneIdentifier = "UTC"
     @LocalState private var quotaGB = ""
     @LocalState private var accounting: TrafficAccounting = .max
+    @LocalState private var statisticsStartConfirmed = false
+    @LocalState private var statisticsStartedAt = Date()
     @LocalState private var trafficMessage: String?
 
     var body: some View {
@@ -47,10 +49,25 @@ struct SettingsView: View {
                 }
                 Text("公开面板可留空。私有面板需要管理员 API Key；该 Key 拥有管理员权限，本客户端仅调用监控接口。")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("API Key 保存到这台 Mac 的钥匙串。使用 Key 时请连接 HTTPS，或通过 SSH 隧道使用本机地址。")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } header: {
                 Text("Komari 连接")
+            }
+            Section {
+                Picker("刷新间隔", selection: Binding(get: { model.refreshIntervalSeconds }, set: { model.setRefreshInterval($0) })) {
+                    ForEach(ClientPreferences.supportedRefreshIntervals, id: \.self) { interval in
+                        Text("每 \(Int(interval)) 秒").tag(interval)
+                    }
+                }
+                .disabled(isSaving)
+                Text("修改后立即生效并保存。仅调整这台 Mac 更新服务器状态的频率，服务器端仍按原频率采集。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("自动刷新")
             }
             if let error = model.lastError {
                 Section {
@@ -80,6 +97,9 @@ struct SettingsView: View {
                     .disabled(isSaving || baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     if isSaving { ProgressView().controlSize(.small) }
                     Spacer()
+                }
+                if model.isConfigured && !model.isDemoMode {
+                    Button("打开监控窗口") { AppWindows.shared.showDashboard(model: model) }
                 }
                 Button("查看示例界面") { model.useDemo(); connectionMessage = "当前显示示例数据。" }
                     .disabled(isSaving)
@@ -123,6 +143,7 @@ struct SettingsView: View {
                 Toggle("我已确认 Agent 启用了按月重置流量", isOn: $rotationConfirmed)
                 Text("未确认时仅显示累计流量，不把服务器启动以来的累计量标成本期用量。这里的设置不会修改服务器上的 Agent。")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Picker("每月重置日", selection: $resetDay) {
                     ForEach(1...31, id: \.self) { Text("每月 \($0) 日").tag($0) }
                 }
@@ -130,8 +151,21 @@ struct SettingsView: View {
                     .autocorrectionDisabled()
                 Text("重置日在该时区的 00:00 生效。当月没有所选日期时，按 Komari 的行为顺延到次月 1 日。时区和日期应与 Agent 一致。")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } header: {
                 Text("账期口径")
+            }
+            Section {
+                Toggle("已确认 Agent 的统计开始时间", isOn: $statisticsStartConfirmed)
+                if statisticsStartConfirmed {
+                    DatePicker("开始统计时间", selection: $statisticsStartedAt, displayedComponents: [.date, .hourAndMinute])
+                        .environment(\.timeZone, TimeZone(identifier: timeZoneIdentifier) ?? .current)
+                }
+                Text("填写 Agent 启用月重置或重新开始统计的实际时间，日期按上方 Agent 时区显示。未确认时不估算剩余额度；账期中途开始的首期只显示已记录用量，下一次重置后再显示完整账期预算。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("数据完整性")
             }
             Section {
                 TextField("流量额度（GB，留空为不设置）", text: $quotaGB)
@@ -140,6 +174,7 @@ struct SettingsView: View {
                 }
                 Text("1 GB = 1,000,000,000 字节。额度进度为参考值，供应商后台是最终依据。")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } header: {
                 Text("套餐额度")
             }
@@ -177,6 +212,8 @@ struct SettingsView: View {
         timeZoneIdentifier = value.timeZoneIdentifier
         quotaGB = value.quotaBytes.map { String(format: "%g", $0 / 1_000_000_000) } ?? ""
         accounting = value.accounting
+        statisticsStartConfirmed = value.statisticsStartedAt != nil
+        statisticsStartedAt = value.statisticsStartedAt ?? Date()
         trafficMessage = nil
     }
 
@@ -184,6 +221,10 @@ struct SettingsView: View {
         let zone = timeZoneIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard TimeZone(identifier: zone) != nil else {
             trafficMessage = "时区无效，请填写 UTC 或 Asia/Shanghai 这样的时区名称。"
+            return
+        }
+        guard !statisticsStartConfirmed || statisticsStartedAt <= Date() else {
+            trafficMessage = "统计开始时间不能晚于当前时间。"
             return
         }
         let quotaText = quotaGB.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -196,7 +237,7 @@ struct SettingsView: View {
             }
             bytes = amount * 1_000_000_000
         }
-        model.updateTrafficSettings(TrafficSettings(monthlyRotationConfirmed: rotationConfirmed, resetDay: resetDay, timeZoneIdentifier: zone, quotaBytes: bytes, accounting: accounting))
+        model.updateTrafficSettings(TrafficSettings(monthlyRotationConfirmed: rotationConfirmed, resetDay: resetDay, timeZoneIdentifier: zone, quotaBytes: bytes, accounting: accounting, statisticsStartedAt: statisticsStartConfirmed ? statisticsStartedAt : nil))
         trafficMessage = "已保存。请确保这些设置与 Agent 和供应商的统计口径一致。"
     }
 }

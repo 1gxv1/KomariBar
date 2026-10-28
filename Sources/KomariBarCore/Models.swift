@@ -111,12 +111,16 @@ public struct TrafficSettings: Codable, Equatable, Sendable {
     public var timeZoneIdentifier: String
     public var quotaBytes: Double?
     public var accounting: TrafficAccounting
+    /// The actual time the Agent began this continuous set of counters.
+    /// Missing values preserve older settings while treating coverage as unknown.
+    public var statisticsStartedAt: Date?
 
-    public init(monthlyRotationConfirmed: Bool = false, resetDay: Int = 1, timeZoneIdentifier: String = "UTC", quotaBytes: Double? = nil, accounting: TrafficAccounting = .max) {
+    public init(monthlyRotationConfirmed: Bool = false, resetDay: Int = 1, timeZoneIdentifier: String = "UTC", quotaBytes: Double? = nil, accounting: TrafficAccounting = .max, statisticsStartedAt: Date? = nil) {
         self.monthlyRotationConfirmed = monthlyRotationConfirmed
         self.resetDay = resetDay
         self.timeZoneIdentifier = timeZoneIdentifier
         self.quotaBytes = quotaBytes
         self.accounting = accounting
+        self.statisticsStartedAt = statisticsStartedAt
     }
 }

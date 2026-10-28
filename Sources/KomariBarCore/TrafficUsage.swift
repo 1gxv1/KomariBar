@@ -3,6 +3,8 @@ import Foundation
 /// A display-ready interpretation of the Agent's counters. This never derives
 /// billed bytes from chart samples, which may be downsampled by the server.
 public struct TrafficUsage: Equatable, Sendable {
+    public let uploadedBytes: Double
+    public let downloadedBytes: Double
     public let usedBytes: Double
     public let quotaBytes: Double?
     public let remainingBytes: Double?
@@ -35,6 +37,7 @@ public struct TrafficUsage: Equatable, Sendable {
 
         func cumulative(_ issue: String) -> TrafficUsage {
             TrafficUsage(
+                uploadedBytes: uploaded, downloadedBytes: downloaded,
                 usedBytes: used, quotaBytes: nil, remainingBytes: nil,
                 fractionUsed: nil, period: nil, label: "累计流量",
                 configurationIssue: issue
@@ -57,11 +60,31 @@ public struct TrafficUsage: Equatable, Sendable {
             return cumulative("最新上报不在当前账期内，请刷新后再查看本期用量。")
         }
 
+        func incomplete(_ issue: String) -> TrafficUsage {
+            TrafficUsage(
+                uploadedBytes: uploaded, downloadedBytes: downloaded,
+                usedBytes: used, quotaBytes: nil, remainingBytes: nil,
+                fractionUsed: nil, period: interval, label: "本期已记录",
+                configurationIssue: issue
+            )
+        }
+        guard let startedAt = settings.statisticsStartedAt else {
+            return incomplete("尚未确认 Agent 的统计开始时间，本期数据可能不完整，暂不估算剩余额度。")
+        }
+        guard startedAt.timeIntervalSince1970.isFinite, startedAt <= snapshot.timestamp else {
+            return incomplete("统计开始时间晚于最新上报或时间无效，请检查设置；暂不估算剩余额度。")
+        }
+        guard startedAt <= interval.start else {
+            return incomplete("Agent 在本期中途开始统计，本期数据不完整；下一次重置后才会显示完整账期预算。")
+        }
+
         let quota = settings.quotaBytes.flatMap { value in
             value.isFinite && value > 0 ? value : nil
         }
         let ratio = quota.map { used / $0 }.map { $0.isFinite ? $0 : Double.greatestFiniteMagnitude }
         return TrafficUsage(
+            uploadedBytes: uploaded,
+            downloadedBytes: downloaded,
             usedBytes: used,
             quotaBytes: quota,
             remainingBytes: quota.map { Swift.max(0, $0 - used) },
