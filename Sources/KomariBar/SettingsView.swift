@@ -17,6 +17,11 @@ struct SettingsView: View {
     @LocalState private var statisticsStartConfirmed = false
     @LocalState private var statisticsStartedAt = Date()
     @LocalState private var trafficMessage: String?
+    @LocalState private var calibrationSource = "服务商后台"
+    @LocalState private var calibrationUsedGB = ""
+    @LocalState private var calibrationUploadedGB = ""
+    @LocalState private var calibrationDownloadedGB = ""
+    @LocalState private var calibrationMessage: String?
 
     var body: some View {
         TabView(selection: $tab) {
@@ -161,7 +166,7 @@ struct SettingsView: View {
                     DatePicker("开始统计时间", selection: $statisticsStartedAt, displayedComponents: [.date, .hourAndMinute])
                         .environment(\.timeZone, TimeZone(identifier: timeZoneIdentifier) ?? .current)
                 }
-                Text("填写 Agent 启用月重置或重新开始统计的实际时间，日期按上方 Agent 时区显示。未确认时不估算剩余额度；账期中途开始的首期只显示已记录用量，下一次重置后再显示完整账期预算。")
+                Text("填写 Agent 启用月重置或重新开始统计的实际时间，日期按上方 Agent 时区显示。未使用校准时，时间未确认或首期不完整只显示已记录用量；下一次重置后再显示完整账期预算。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
@@ -184,8 +189,68 @@ struct SettingsView: View {
             Button("保存当前服务器的设置", action: saveTrafficSettings)
                 .buttonStyle(.borderedProminent)
                 .disabled(model.selectedNode == nil)
+            calibrationSection
         }
         .formStyle(.grouped)
+    }
+
+    private var calibrationSection: some View {
+        Section {
+            Text("将服务商当前账期的读数与此刻 Agent 计数对应，后续按 Komari 增量估算。请尽量同时读取后台并创建校准；后台自身的更新延迟仍可能造成差异。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextField("来源名称", text: $calibrationSource, prompt: Text("服务商后台"))
+            TextField("服务商已用合计（GB）", text: $calibrationUsedGB)
+            TextField("服务商已上传（GB）", text: $calibrationUploadedGB)
+            TextField("服务商已下载（GB）", text: $calibrationDownloadedGB)
+            Button("使用当前上报创建本期校准", action: createCalibration)
+                .disabled(!canCreateCalibration)
+            if !calibrationMatchesSavedSettings {
+                Text("请先保存上方的账期口径与统计开始时间，再创建校准。")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !canCreateCalibration {
+                Text("创建校准需要已连接的真实节点、在线的新鲜上报，并确认 Agent 已启用月重置。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let calibration = model.trafficSettings.calibration {
+                Text("已保存 \(calibration.source) 基准 \(UIFormat.billingTraffic(calibration.providerUsedBytes)) · \(UIFormat.clock(calibration.calibratedAt)) 校准；\(UIFormat.cycleDate(calibration.periodEnd, zone: calibration.timeZoneIdentifier)) 重置后自动失效。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.selectedTraffic?.appliedCalibration == nil, let issue = model.selectedTraffic?.configurationIssue {
+                    Text(issue).font(.caption).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button("移除已保存的校准") {
+                    model.removeTrafficCalibration()
+                    calibrationMessage = "已移除，恢复使用 Agent 已采集的计数。"
+                }
+            }
+            if let calibrationMessage {
+                Text(calibrationMessage).font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("校准只影响本期用量估算，不补齐历史图表。下一账期恢复 Agent 的月计数；修改重置日、时区、计量方式或统计开始时间后，需要重新校准。1 GB = 1,000,000,000 字节。")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } header: {
+            Text("当前账期校准")
+        }
+    }
+
+    private var calibrationMatchesSavedSettings: Bool {
+        let saved = model.trafficSettings
+        return rotationConfirmed == saved.monthlyRotationConfirmed && resetDay == saved.resetDay
+            && timeZoneIdentifier.trimmingCharacters(in: .whitespacesAndNewlines) == saved.timeZoneIdentifier
+            && accounting == saved.accounting
+            && (statisticsStartConfirmed ? statisticsStartedAt : nil) == saved.statisticsStartedAt
+    }
+
+    private var canCreateCalibration: Bool {
+        guard calibrationMatchesSavedSettings, model.isConfigured, !model.isDemoMode,
+              model.trafficSettings.monthlyRotationConfirmed, let snapshot = model.selectedSnapshot else { return false }
+        return snapshot.isOnline && model.isSnapshotFresh(snapshot.timestamp)
     }
 
     private var aboutView: some View {
@@ -215,6 +280,12 @@ struct SettingsView: View {
         statisticsStartConfirmed = value.statisticsStartedAt != nil
         statisticsStartedAt = value.statisticsStartedAt ?? Date()
         trafficMessage = nil
+        calibrationSource = value.calibration?.source ?? "服务商后台"
+        // A new calibration requires a freshly read provider value, not prefilled old readings.
+        calibrationUsedGB = ""
+        calibrationUploadedGB = ""
+        calibrationDownloadedGB = ""
+        calibrationMessage = nil
     }
 
     private func saveTrafficSettings() {
@@ -237,7 +308,28 @@ struct SettingsView: View {
             }
             bytes = amount * 1_000_000_000
         }
-        model.updateTrafficSettings(TrafficSettings(monthlyRotationConfirmed: rotationConfirmed, resetDay: resetDay, timeZoneIdentifier: zone, quotaBytes: bytes, accounting: accounting, statisticsStartedAt: statisticsStartConfirmed ? statisticsStartedAt : nil))
+        model.updateTrafficSettings(TrafficSettings(monthlyRotationConfirmed: rotationConfirmed, resetDay: resetDay, timeZoneIdentifier: zone, quotaBytes: bytes, accounting: accounting, statisticsStartedAt: statisticsStartConfirmed ? statisticsStartedAt : nil, calibration: model.trafficSettings.calibration))
         trafficMessage = "已保存。请确保这些设置与 Agent 和供应商的统计口径一致。"
+    }
+
+    private func createCalibration() {
+        do {
+            func bytes(_ text: String) throws -> Double {
+                guard let value = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                      value.isFinite, value >= 0, (value * 1_000_000_000).isFinite else {
+                    throw TrafficCalibrationError.invalidCounter
+                }
+                return value * 1_000_000_000
+            }
+            try model.createTrafficCalibration(
+                providerUsedBytes: bytes(calibrationUsedGB),
+                providerUploadedBytes: bytes(calibrationUploadedGB),
+                providerDownloadedBytes: bytes(calibrationDownloadedGB),
+                source: calibrationSource
+            )
+            calibrationMessage = "已创建本期校准，后续用量按 Komari 增量估算，以服务商后台为准。"
+        } catch {
+            calibrationMessage = error.localizedDescription
+        }
     }
 }

@@ -21,9 +21,9 @@ enum UIFormat {
         return age >= -30 && age <= 30
     }
 
-    static func percent(_ value: Double) -> String {
+    static func percent(_ value: Double, decimals: Int = 1) -> String {
         guard value.isFinite else { return "—" }
-        return String(format: "%.1f%%", max(0, value))
+        return String(format: "%.*f%%", decimals, max(0, value))
     }
 
     static func compact(_ value: Double) -> String {
@@ -37,6 +37,14 @@ enum UIFormat {
 
     static func traffic(_ bytes: Double) -> String {
         size(bytes, base: 1000, units: ["B", "KB", "MB", "GB", "TB", "PB"])
+    }
+
+    static func billingTraffic(_ bytes: Double) -> String {
+        guard bytes.isFinite, bytes >= 0 else { return "—" }
+        if bytes >= 1_000_000_000 {
+            return String(format: "%.2f GB", bytes / 1_000_000_000)
+        }
+        return traffic(bytes)
     }
 
     static func speed(_ bytes: Double) -> String { traffic(bytes) + "/s" }

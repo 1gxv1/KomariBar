@@ -144,6 +144,7 @@ final class AppState: ObservableObject {
             }
             let latest = try await client.fetchSnapshots(nodeIDs: nodes.map(\.id))
             guard generation == requestGeneration else { return }
+            invalidateRegressedCalibrations(latest: latest)
             snapshots = latest
             lastError = nil
             lastSuccessfulRefresh = Date()
@@ -232,6 +233,44 @@ final class AppState: ObservableObject {
     func updateTrafficSettings(_ settings: TrafficSettings) {
         savedTrafficSettings[trafficSettingsKey] = settings
         if let data = try? JSONEncoder().encode(savedTrafficSettings) {
+            defaults.set(data, forKey: "trafficSettings")
+        }
+    }
+
+    func createTrafficCalibration(providerUsedBytes: Double, providerUploadedBytes: Double, providerDownloadedBytes: Double, source: String) throws {
+        guard isConfigured, !isDemoMode, let snapshot = selectedSnapshot else {
+            throw TrafficCalibrationError.snapshotUnavailable
+        }
+        var settings = trafficSettings
+        settings.calibration = try TrafficCalibration.create(
+            snapshot: snapshot, settings: settings,
+            providerUsedBytes: providerUsedBytes,
+            providerUploadedBytes: providerUploadedBytes,
+            providerDownloadedBytes: providerDownloadedBytes,
+            source: source,
+            maximumSnapshotAge: ClientPreferences(refreshIntervalSeconds: refreshIntervalSeconds).staleDataThreshold
+        )
+        updateTrafficSettings(settings)
+    }
+
+    func removeTrafficCalibration() {
+        var settings = trafficSettings
+        settings.calibration = nil
+        updateTrafficSettings(settings)
+    }
+
+    private func invalidateRegressedCalibrations(latest: [String: ServerSnapshot]) {
+        var changed = false
+        for (nodeID, snapshot) in latest {
+            let key = "\(configuredURLString)|\(nodeID)"
+            guard var settings = savedTrafficSettings[key], var calibration = settings.calibration else { continue }
+            if calibration.invalidateIfCountersRegressed(snapshot: snapshot, previousSnapshot: snapshots[nodeID]) {
+                settings.calibration = calibration
+                savedTrafficSettings[key] = settings
+                changed = true
+            }
+        }
+        if changed, let data = try? JSONEncoder().encode(savedTrafficSettings) {
             defaults.set(data, forKey: "trafficSettings")
         }
     }

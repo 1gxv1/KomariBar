@@ -12,6 +12,7 @@ public struct TrafficUsage: Equatable, Sendable {
     public let period: DateInterval?
     public let label: String
     public let configurationIssue: String?
+    public let appliedCalibration: TrafficCalibration?
 
     public static func calculate(
         snapshot: ServerSnapshot,
@@ -20,27 +21,15 @@ public struct TrafficUsage: Equatable, Sendable {
     ) -> TrafficUsage {
         let uploaded = nonnegativeFinite(snapshot.uploadedBytes)
         let downloaded = nonnegativeFinite(snapshot.downloadedBytes)
-        let used: Double
-        switch settings.accounting {
-        case .sum:
-            let sum = uploaded + downloaded
-            used = sum.isFinite ? sum : Double.greatestFiniteMagnitude
-        case .max:
-            used = Swift.max(uploaded, downloaded)
-        case .min:
-            used = Swift.min(uploaded, downloaded)
-        case .upload:
-            used = uploaded
-        case .download:
-            used = downloaded
-        }
+        let amount = settings.accounting.amount(uploaded: uploaded, downloaded: downloaded)
+        let used = amount.isFinite ? amount : Double.greatestFiniteMagnitude
 
         func cumulative(_ issue: String) -> TrafficUsage {
             TrafficUsage(
                 uploadedBytes: uploaded, downloadedBytes: downloaded,
                 usedBytes: used, quotaBytes: nil, remainingBytes: nil,
                 fractionUsed: nil, period: nil, label: "累计流量",
-                configurationIssue: issue
+                configurationIssue: issue, appliedCalibration: nil
             )
         }
 
@@ -65,8 +54,28 @@ public struct TrafficUsage: Equatable, Sendable {
                 uploadedBytes: uploaded, downloadedBytes: downloaded,
                 usedBytes: used, quotaBytes: nil, remainingBytes: nil,
                 fractionUsed: nil, period: interval, label: "本期已记录",
-                configurationIssue: issue
+                configurationIssue: issue, appliedCalibration: nil
             )
+        }
+        func budget(uploaded: Double, downloaded: Double, used: Double, calibration: TrafficCalibration? = nil) -> TrafficUsage {
+            let quota = settings.quotaBytes.flatMap { value in value.isFinite && value > 0 ? value : nil }
+            let ratio = quota.map { used / $0 }.map { $0.isFinite ? $0 : Double.greatestFiniteMagnitude }
+            return TrafficUsage(
+                uploadedBytes: uploaded, downloadedBytes: downloaded, usedBytes: used,
+                quotaBytes: quota, remainingBytes: quota.map { Swift.max(0, $0 - used) },
+                fractionUsed: ratio, period: interval,
+                label: calibration == nil ? "本期流量" : "本期估算",
+                configurationIssue: nil, appliedCalibration: calibration
+            )
+        }
+        if let calibration = settings.calibration, !calibration.isExpired(in: interval) {
+            if let issue = calibration.validationIssue(snapshot: snapshot, settings: settings, period: interval, now: now) {
+                return incomplete(issue)
+            }
+            guard let estimate = calibration.estimate(snapshot: snapshot) else {
+                return incomplete("校准后的流量数据超出有效范围，请重新校准；暂不估算剩余额度。")
+            }
+            return budget(uploaded: estimate.uploaded, downloaded: estimate.downloaded, used: estimate.used, calibration: calibration)
         }
         guard let startedAt = settings.statisticsStartedAt else {
             return incomplete("尚未确认 Agent 的统计开始时间，本期数据可能不完整，暂不估算剩余额度。")
@@ -78,21 +87,7 @@ public struct TrafficUsage: Equatable, Sendable {
             return incomplete("Agent 在本期中途开始统计，本期数据不完整；下一次重置后才会显示完整账期预算。")
         }
 
-        let quota = settings.quotaBytes.flatMap { value in
-            value.isFinite && value > 0 ? value : nil
-        }
-        let ratio = quota.map { used / $0 }.map { $0.isFinite ? $0 : Double.greatestFiniteMagnitude }
-        return TrafficUsage(
-            uploadedBytes: uploaded,
-            downloadedBytes: downloaded,
-            usedBytes: used,
-            quotaBytes: quota,
-            remainingBytes: quota.map { Swift.max(0, $0 - used) },
-            fractionUsed: ratio,
-            period: interval,
-            label: "本期流量",
-            configurationIssue: nil
-        )
+        return budget(uploaded: uploaded, downloaded: downloaded, used: used)
     }
 
     private static func nonnegativeFinite(_ value: Double) -> Double {
@@ -101,7 +96,7 @@ public struct TrafficUsage: Equatable, Sendable {
 
     /// Match Komari Agent 1.5.11: an unavailable day (e.g. February 31)
     /// rotates on the first day of the next month, not February's last day.
-    private static func billingPeriod(containing now: Date, resetDay: Int, timeZone: TimeZone) -> DateInterval? {
+    static func billingPeriod(containing now: Date, resetDay: Int, timeZone: TimeZone) -> DateInterval? {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         guard let currentMonth = calendar.dateInterval(of: .month, for: now)?.start else { return nil }

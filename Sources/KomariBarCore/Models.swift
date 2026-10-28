@@ -13,6 +13,16 @@ public enum TrafficAccounting: String, Codable, CaseIterable, Identifiable, Send
         case .download: return "仅下载"
         }
     }
+
+    func amount(uploaded: Double, downloaded: Double) -> Double {
+        switch self {
+        case .sum: return uploaded + downloaded
+        case .max: return Swift.max(uploaded, downloaded)
+        case .min: return Swift.min(uploaded, downloaded)
+        case .upload: return uploaded
+        case .download: return downloaded
+        }
+    }
 }
 
 public struct ServerNode: Identifiable, Equatable, Sendable {
@@ -114,13 +124,15 @@ public struct TrafficSettings: Codable, Equatable, Sendable {
     /// The actual time the Agent began this continuous set of counters.
     /// Missing values preserve older settings while treating coverage as unknown.
     public var statisticsStartedAt: Date?
+    public var calibration: TrafficCalibration?
 
-    public init(monthlyRotationConfirmed: Bool = false, resetDay: Int = 1, timeZoneIdentifier: String = "UTC", quotaBytes: Double? = nil, accounting: TrafficAccounting = .max, statisticsStartedAt: Date? = nil) {
+    public init(monthlyRotationConfirmed: Bool = false, resetDay: Int = 1, timeZoneIdentifier: String = "UTC", quotaBytes: Double? = nil, accounting: TrafficAccounting = .max, statisticsStartedAt: Date? = nil, calibration: TrafficCalibration? = nil) {
         self.monthlyRotationConfirmed = monthlyRotationConfirmed
         self.resetDay = resetDay
         self.timeZoneIdentifier = timeZoneIdentifier
         self.quotaBytes = quotaBytes
         self.accounting = accounting
         self.statisticsStartedAt = statisticsStartedAt
+        self.calibration = calibration
     }
 }

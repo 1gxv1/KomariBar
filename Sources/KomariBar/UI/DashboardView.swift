@@ -461,9 +461,9 @@ private struct TrafficCard: View {
     let settings: TrafficSettings
     let openSettings: () -> Void
 
-    private var periodConfirmed: Bool { settings.monthlyRotationConfirmed && usage.period != nil && usage.configurationIssue == nil }
+    private var canShowBudget: Bool { settings.monthlyRotationConfirmed && usage.period != nil && usage.configurationIssue == nil }
     private var accent: Color {
-        guard let fraction = usage.fractionUsed, periodConfirmed else { return Palette.lavender }
+        guard let fraction = usage.fractionUsed, canShowBudget else { return Palette.lavender }
         return fraction >= 1 ? Palette.red : (fraction >= 0.8 ? Palette.amber : Palette.lavender)
     }
 
@@ -476,8 +476,8 @@ private struct TrafficCard: View {
                 }
                 .font(.system(size: 12, weight: .semibold))
                 Spacer()
-                if let fraction = usage.fractionUsed, periodConfirmed {
-                    Text(UIFormat.percent(fraction * 100))
+                if let fraction = usage.fractionUsed, canShowBudget {
+                    Text(UIFormat.percent(fraction * 100, decimals: 2))
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(accent)
                 } else {
@@ -488,30 +488,30 @@ private struct TrafficCard: View {
                 }
             }
             HStack(alignment: .firstTextBaseline, spacing: 7) {
-                Text(UIFormat.traffic(usage.usedBytes))
+                Text(UIFormat.billingTraffic(usage.usedBytes))
                     .font(.system(size: 25, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(Palette.primary)
-                if let quota = usage.quotaBytes, periodConfirmed {
-                    Text("/ \(UIFormat.traffic(quota))")
+                if let quota = usage.quotaBytes, canShowBudget {
+                    Text("/ \(UIFormat.billingTraffic(quota))")
                         .font(.system(size: 13, design: .rounded))
                         .foregroundStyle(Palette.secondary)
                 }
                 Spacer()
-                if let remaining = usage.remainingBytes, periodConfirmed {
+                if let remaining = usage.remainingBytes, canShowBudget {
                     VStack(alignment: .trailing, spacing: 3) {
-                        Text("剩余额度").font(.system(size: 9)).foregroundStyle(Palette.secondary)
-                        Text(UIFormat.traffic(remaining)).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Palette.mint)
+                        Text(usage.appliedCalibration == nil ? "剩余额度" : "估算剩余").font(.system(size: 9)).foregroundStyle(Palette.secondary)
+                        Text(UIFormat.billingTraffic(remaining)).font(.system(size: 12, weight: .medium, design: .monospaced)).foregroundStyle(Palette.mint)
                     }
                 }
             }
             HStack(spacing: 14) {
-                Label("上传 \(UIFormat.traffic(usage.uploadedBytes))", systemImage: "arrow.up")
-                Label("下载 \(UIFormat.traffic(usage.downloadedBytes))", systemImage: "arrow.down")
+                Label("\(usage.appliedCalibration == nil ? "上传" : "估算上传") \(UIFormat.billingTraffic(usage.uploadedBytes))", systemImage: "arrow.up")
+                Label("\(usage.appliedCalibration == nil ? "下载" : "估算下载") \(UIFormat.billingTraffic(usage.downloadedBytes))", systemImage: "arrow.down")
             }
             .font(.system(size: 10, design: .monospaced))
             .foregroundStyle(Palette.secondary)
-            if periodConfirmed {
+            if canShowBudget {
                 UsageBar(fraction: usage.fractionUsed, accent: accent, height: 7)
                 HStack {
                     Text(settings.accounting.title)
@@ -525,6 +525,16 @@ private struct TrafficCard: View {
                 Text("账期时区：\(settings.timeZoneIdentifier) · 用量以服务商账单为准")
                     .font(.system(size: 9))
                     .foregroundStyle(Palette.secondary.opacity(0.8))
+                if let calibration = usage.appliedCalibration {
+                    Text("\(calibration.source)基准 \(UIFormat.billingTraffic(calibration.providerUsedBytes)) · \(UIFormat.clock(calibration.calibratedAt)) 校准")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.lavender)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("上传、下载和已用量后续按 Komari 增量估算；历史图表仅包含实际采集记录。")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Palette.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } else {
                 Text(usage.configurationIssue ?? "确认 Agent 的每月流量重置日后，才会展示账期用量和剩余额度。")
                     .font(.system(size: 10))
