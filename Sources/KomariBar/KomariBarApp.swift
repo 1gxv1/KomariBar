@@ -16,7 +16,7 @@ struct KomariBarApp: App {
         MenuBarExtra {
             DashboardView(model: model, openSettings: { AppWindows.shared.showSettings(model: model) })
         } label: {
-            Image(nsImage: MenuBarIcon.image)
+            Image(systemName: "server.rack")
                 .accessibilityLabel("KomariBar，打开服务器监控")
                 .accessibilityHint(model.menuBarText)
                 .help("KomariBar · \(model.menuBarText)")
