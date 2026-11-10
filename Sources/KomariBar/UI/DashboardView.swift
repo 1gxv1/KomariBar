@@ -517,7 +517,7 @@ private struct TrafficCard: View {
                     Text(settings.accounting.title)
                     Spacer()
                     if let period = usage.period {
-                        Text("\(UIFormat.cycleDate(period.start, zone: settings.timeZoneIdentifier)) 起 · \(UIFormat.cycleDate(period.end, zone: settings.timeZoneIdentifier)) 重置")
+                        Text("\(UIFormat.cycleDate(period.start, zone: settings.timeZoneIdentifier)) 起 · \(UIFormat.resetDate(period.end, zone: settings.timeZoneIdentifier)) 重置")
                     }
                 }
                 .font(.system(size: 9))
@@ -544,7 +544,7 @@ private struct TrafficCard: View {
                     HStack {
                         Text(settings.accounting.title)
                         Spacer()
-                        Text("\(UIFormat.cycleDate(period.end, zone: settings.timeZoneIdentifier)) 重置 · \(settings.timeZoneIdentifier)")
+                        Text("\(UIFormat.resetDate(period.end, zone: settings.timeZoneIdentifier)) 重置 · \(settings.timeZoneIdentifier)")
                     }
                     .font(.system(size: 9))
                     .foregroundStyle(Palette.secondary)

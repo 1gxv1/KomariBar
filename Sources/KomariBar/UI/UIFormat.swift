@@ -80,6 +80,14 @@ enum UIFormat {
         return formatter.string(from: date)
     }
 
+    static func resetDate(_ date: Date, zone: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = TimeZone(identifier: zone) ?? TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "M 月 d 日 HH:mm"
+        return formatter.string(from: date)
+    }
+
     static func serverDescription(_ node: ServerNode) -> String {
         let values = [node.region, node.os, node.cpuName].filter { !$0.isEmpty }
         return values.isEmpty ? "等待主机信息" : values.joined(separator: " · ")

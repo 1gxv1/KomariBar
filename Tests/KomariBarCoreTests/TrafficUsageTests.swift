@@ -35,6 +35,52 @@ final class TrafficUsageTests: XCTestCase {
         XCTAssertEqual(current.period?.end, iso("2026-11-14T16:00:00Z"))
     }
 
+    func testEleventhShanghaiResetOccursAtPreviousUTCDaySixteen() {
+        var settings = configured(resetDay: 11, accounting: .sum)
+        settings.timeZoneIdentifier = "Asia/Shanghai"
+        let before = iso("2026-11-10T15:59:59Z")
+        let reset = iso("2026-11-10T16:00:00Z")
+
+        let previous = TrafficUsage.calculate(snapshot: snapshot(at: before, upload: 800, download: 100), settings: settings, now: before)
+        XCTAssertEqual(previous.period?.start, iso("2026-10-10T16:00:00Z"))
+        XCTAssertEqual(previous.period?.end, reset)
+        XCTAssertEqual(previous.usedBytes, 900)
+        XCTAssertEqual(previous.remainingBytes, 100)
+
+        let current = TrafficUsage.calculate(snapshot: snapshot(at: reset, upload: 20, download: 10), settings: settings, now: reset)
+        XCTAssertEqual(current.period?.start, reset)
+        XCTAssertEqual(current.period?.end, iso("2026-12-10T16:00:00Z"))
+        XCTAssertEqual(current.label, "本期流量")
+        XCTAssertEqual(current.usedBytes, 30)
+        XCTAssertEqual(current.remainingBytes, 970)
+        XCTAssertNil(current.configurationIssue)
+    }
+
+    func testEleventhShanghaiResetCrossesYearBoundary() {
+        var settings = configured(resetDay: 11)
+        settings.timeZoneIdentifier = "Asia/Shanghai"
+        let before = iso("2027-01-10T15:59:59Z")
+        let reset = iso("2027-01-10T16:00:00Z")
+        let previous = TrafficUsage.calculate(snapshot: snapshot(at: before), settings: settings, now: before)
+        XCTAssertEqual(previous.period?.start, iso("2026-12-10T16:00:00Z"))
+        XCTAssertEqual(previous.period?.end, reset)
+        let current = TrafficUsage.calculate(snapshot: snapshot(at: reset), settings: settings, now: reset)
+        XCTAssertEqual(current.period?.start, reset)
+        XCTAssertEqual(current.period?.end, iso("2027-02-10T16:00:00Z"))
+    }
+
+    func testShanghaiResetDoesNotReusePreviousPeriodSnapshot() {
+        var settings = configured(resetDay: 11)
+        settings.timeZoneIdentifier = "Asia/Shanghai"
+        let reset = iso("2026-11-10T16:00:00Z")
+        let stale = snapshot(at: reset.addingTimeInterval(-1), upload: 800, download: 100)
+        let result = TrafficUsage.calculate(snapshot: stale, settings: settings, now: reset)
+        XCTAssertEqual(result.label, "累计流量")
+        XCTAssertNil(result.period)
+        XCTAssertNil(result.remainingBytes)
+        XCTAssertTrue(result.configurationIssue?.contains("当前账期") == true)
+    }
+
     func testMissingDayThirtyOneRotatesOnNextMonthFirst() {
         let february = iso("2026-02-28T23:59:59Z")
         let settings = configured(resetDay: 31)
